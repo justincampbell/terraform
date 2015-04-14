@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/aws-sdk-go/aws"
 	"github.com/hashicorp/aws-sdk-go/gen/autoscaling"
+	"github.com/hashicorp/aws-sdk-go/gen/elb"
 )
 
 func resourceAwsAutoscalingGroup() *schema.Resource {
@@ -54,6 +55,16 @@ func resourceAwsAutoscalingGroup() *schema.Resource {
 				Optional: true,
 				Computed: true,
 				ForceNew: true,
+			},
+
+			"dns_names": &schema.Schema{
+				Type:     schema.TypeSet,
+				Optional: true,
+				Computed: true,
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Set: func(v interface{}) int {
+					return hashcode.String(v.(string))
+				},
 			},
 
 			"force_delete": &schema.Schema{
@@ -206,7 +217,32 @@ func resourceAwsAutoscalingGroupRead(d *schema.ResourceData, meta interface{}) e
 	d.Set("vpc_zone_identifier", strings.Split(*g.VPCZoneIdentifier, ","))
 	d.Set("termination_policies", g.TerminationPolicies)
 
+	dnsNames, err := getDnsNames(g.LoadBalancerNames, meta)
+	if err != nil {
+		return err
+	}
+	if err := d.Set("dns_names", dnsNames); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func getDnsNames(loadBalancerNames []string, meta interface{}) ([]string, error) {
+	elbconn := meta.(*AWSClient).elbconn
+	describe, err := elbconn.DescribeLoadBalancers(&elb.DescribeAccessPointsInput{
+		LoadBalancerNames: loadBalancerNames,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	dnsNames := []string{}
+	for _, lb := range describe.LoadBalancerDescriptions {
+		dnsNames = append(dnsNames, *lb.DNSName)
+	}
+
+	return dnsNames, nil
 }
 
 func resourceAwsAutoscalingGroupUpdate(d *schema.ResourceData, meta interface{}) error {
